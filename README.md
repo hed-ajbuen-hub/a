@@ -20,7 +20,7 @@ The app creates a SQLite database named `.donations.sqlite` on first launch and 
 | Administrator | `admin` | `Admin123!` |
 | Regular user | `donation_user` | `GiveWithCare2026!` |
 
-Regular users can view records and create donors or donations. Only administrators can create campaigns or beneficiaries. Passwords are stored as salted hashes and sessions expire after eight hours. Set `USER_USERNAME` and `USER_PASSWORD` to the same values on every server that should share these credentials. On its first startup after this update, a server changes the legacy regular account named `user` to these credentials and revokes its old sessions. Later restarts do not overwrite password resets. The default credentials are intended for this demo; change them before exposing a deployment publicly.
+Regular users can view records and create donors, donations, and courses. Only administrators can create campaigns or beneficiaries, and only administrators can edit or delete courses. Passwords are stored as salted hashes and sessions expire after eight hours. Set `USER_USERNAME` and `USER_PASSWORD` to the same values on every server that should share these credentials. On its first startup after this update, a server changes the legacy regular account named `user` to these credentials and revokes its old sessions. Later restarts do not overwrite password resets. The default credentials are intended for this demo; change them before exposing a deployment publicly.
 
 ## User password recovery
 

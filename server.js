@@ -476,7 +476,7 @@ app.get("/api/courses", asyncRoute(async (request, response) => {
     response.json(await database.prepare("SELECT * FROM courses ORDER BY course_name").all());
 }));
 
-app.post("/api/courses", requireAdmin, asyncRoute(async (request, response) => {
+app.post("/api/courses", asyncRoute(async (request, response) => {
     const courseName = String(request.body.courseName || "").trim();
     if (!courseName) return response.status(400).json({ error: "Course name is required." });
     if (courseName.length > 100) return response.status(400).json({ error: "Course name must be 100 characters or fewer." });
@@ -538,6 +538,46 @@ app.post("/api/enrollments", asyncRoute(async (request, response) => {
         FROM enrollments JOIN courses ON courses.id = enrollments.course_id
         WHERE enrollments.id = ?
     `).get(result.lastInsertRowid));
+}));
+
+app.put("/api/enrollments/:id", asyncRoute(async (request, response) => {
+    const enrollmentId = Number(request.params.id);
+    if (!Number.isInteger(enrollmentId) || enrollmentId < 1) {
+        return response.status(400).json({ error: "Choose a valid enrollment." });
+    }
+    const existingEnrollment = await database.prepare("SELECT id FROM enrollments WHERE id = ?").get(enrollmentId);
+    if (!existingEnrollment) return response.status(404).json({ error: "Enrollment not found." });
+
+    const studentName = String(request.body.studentName || "").trim();
+    const collegeId = String(request.body.collegeId || "").trim();
+    const courseId = Number(request.body.courseId);
+    const enrollmentDate = String(request.body.enrollmentDate || "").trim();
+    const parsedDate = /^\d{4}-\d{2}-\d{2}$/.test(enrollmentDate)
+        ? new Date(`${enrollmentDate}T00:00:00.000Z`)
+        : null;
+    const validDate = parsedDate && !Number.isNaN(parsedDate.getTime()) && parsedDate.toISOString().slice(0, 10) === enrollmentDate;
+    if (!studentName || !collegeId || !Number.isInteger(courseId) || courseId < 1 || !validDate) {
+        return response.status(400).json({ error: "Enter a student name, college ID, course, and valid enrollment date." });
+    }
+    await database.prepare(
+        "UPDATE enrollments SET student_name = ?, college_id = ?, course_id = ?, enrollment_date = ? WHERE id = ?"
+    ).run(studentName, collegeId, courseId, enrollmentDate, enrollmentId);
+    response.json(await database.prepare(`
+        SELECT enrollments.*, courses.course_name
+        FROM enrollments JOIN courses ON courses.id = enrollments.course_id
+        WHERE enrollments.id = ?
+    `).get(enrollmentId));
+}));
+
+app.delete("/api/enrollments/:id", asyncRoute(async (request, response) => {
+    const enrollmentId = Number(request.params.id);
+    if (!Number.isInteger(enrollmentId) || enrollmentId < 1) {
+        return response.status(400).json({ error: "Choose a valid enrollment." });
+    }
+    const existingEnrollment = await database.prepare("SELECT id FROM enrollments WHERE id = ?").get(enrollmentId);
+    if (!existingEnrollment) return response.status(404).json({ error: "Enrollment not found." });
+    await database.prepare("DELETE FROM enrollments WHERE id = ?").run(enrollmentId);
+    response.sendStatus(204);
 }));
 
 app.get("/api/donations", asyncRoute(async (request, response) => {
