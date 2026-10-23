@@ -1,7 +1,10 @@
 window.DONATION_API_URL = "https://httpshedajbuenhubgithubiodonationmanagementsystemfinal-fx05jihm.b4a.run/";
 
 (() => {
-    const apiBaseUrl = String(window.DONATION_API_URL || "").trim().replace(/\/+$/, "");
+    const localBackendHost = ["localhost", "127.0.0.1", "::1"].includes(window.location.hostname);
+    const apiBaseUrl = localBackendHost
+        ? ""
+        : String(window.DONATION_API_URL || "").trim().replace(/\/+$/, "");
     const hostedOnGitHubPages = window.location.hostname.endsWith(".github.io");
 
     window.apiRequest = (path, options = {}) => {

@@ -7,7 +7,7 @@ loginForm.addEventListener("submit", async (event) => {
     const submitButton = loginForm.querySelector("button[type='submit']");
     submitButton.disabled = true;
     try {
-        const response = await fetch("/api/auth/login", {
+        const response = await window.apiRequest("/api/auth/login", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify(Object.fromEntries(new FormData(loginForm)))
@@ -31,7 +31,7 @@ loginForm.addEventListener("submit", async (event) => {
             }
             throw new Error(result.error || `Sign in failed (HTTP ${response.status}).`);
         }
-        window.location.assign("/index.html");
+        window.location.assign("index.html");
     } catch (error) {
         loginError.textContent = error.message;
     } finally {

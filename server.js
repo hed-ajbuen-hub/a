@@ -7,6 +7,8 @@ const Database = require("better-sqlite3");
 const { Pool } = require("pg");
 
 const app = express();
+const allowedFrontendOrigins = new Set((process.env.FRONTEND_ORIGINS || "")
+    .split(",").map((origin) => origin.trim()).filter(Boolean));
 const port = Number(process.env.PORT) || 3000;
 const databaseUrl = process.env.DATABASE_URL;
 const sessionCookie = "donation_session";
@@ -109,6 +111,19 @@ const sqliteSchema = `
         eligibility_status TEXT NOT NULL CHECK (eligibility_status IN ('Eligible', 'Pending', 'Ineligible')),
         created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     );
+    CREATE TABLE IF NOT EXISTS courses (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        course_name TEXT NOT NULL UNIQUE,
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE TABLE IF NOT EXISTS enrollments (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        student_name TEXT NOT NULL,
+        college_id TEXT NOT NULL UNIQUE,
+        course_id INTEGER NOT NULL REFERENCES courses(id),
+        enrollment_date TEXT NOT NULL,
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
     CREATE TABLE IF NOT EXISTS donations (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         donation_number TEXT NOT NULL UNIQUE,
@@ -155,6 +170,19 @@ const postgresSchema = `
         full_name TEXT NOT NULL,
         classification TEXT NOT NULL DEFAULT '',
         eligibility_status TEXT NOT NULL CHECK (eligibility_status IN ('Eligible', 'Pending', 'Ineligible')),
+        created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE TABLE IF NOT EXISTS courses (
+        id BIGSERIAL PRIMARY KEY,
+        course_name TEXT NOT NULL UNIQUE,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE TABLE IF NOT EXISTS enrollments (
+        id BIGSERIAL PRIMARY KEY,
+        student_name TEXT NOT NULL,
+        college_id TEXT NOT NULL UNIQUE,
+        course_id BIGINT NOT NULL REFERENCES courses(id),
+        enrollment_date DATE NOT NULL,
         created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
     );
     CREATE TABLE IF NOT EXISTS donations (
@@ -236,6 +264,11 @@ async function initializeDatabase() {
         await database.prepare("INSERT INTO beneficiaries (full_name, classification, eligibility_status) VALUES (?, ?, ?)")
             .run("Pedro Ramos", "Senior Citizen", "Pending");
     }
+    if (Number((await database.prepare("SELECT COUNT(*) AS count FROM courses").get()).count) === 0) {
+        for (const courseName of ["BSIT", "BSBA", "BSED", "BSN", "BEED"]) {
+            await database.prepare("INSERT INTO courses (course_name) VALUES (?)").run(courseName);
+        }
+    }
     if (Number((await database.prepare("SELECT COUNT(*) AS count FROM donations").get()).count) === 0) {
         await database.prepare("INSERT INTO donations (donation_number, donor_id, campaign_id, amount, status) VALUES (?, ?, ?, ?, ?)")
             .run("DON-2026-001", 1, 1, 5000, "Verified");
@@ -266,6 +299,21 @@ async function readSession(request) {
     `).get(tokenHash);
 }
 
+app.use((request, response, next) => {
+    const origin = request.get("Origin");
+    if (origin && allowedFrontendOrigins.has(origin)) {
+        response.setHeader("Access-Control-Allow-Origin", origin);
+        response.setHeader("Access-Control-Allow-Credentials", "true");
+        response.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
+        response.setHeader("Access-Control-Allow-Headers", "Content-Type");
+        response.setHeader("Vary", "Origin");
+    }
+    if (request.method === "OPTIONS") {
+        return response.sendStatus(origin && allowedFrontendOrigins.has(origin) ? 204 : 403);
+    }
+    next();
+});
+
 app.use(express.json());
 app.use(express.urlencoded({ extended: false }));
 app.use((request, response, next) => {
@@ -293,7 +341,9 @@ app.post("/api/auth/login", asyncRoute(async (request, response) => {
     await database.prepare("DELETE FROM sessions WHERE expires_at <= CURRENT_TIMESTAMP").run();
     await database.prepare("INSERT INTO sessions (token_hash, user_id, expires_at) VALUES (?, ?, ?)")
         .run(tokenHash, account.id, expiresAt);
-    response.setHeader("Set-Cookie", `${sessionCookie}=${token}; HttpOnly; SameSite=Lax; Path=/; Max-Age=28800${process.env.NODE_ENV === "production" ? "; Secure" : ""}`);
+    const useCrossSiteCookie = process.env.NODE_ENV === "production" || allowedFrontendOrigins.has(request.get("Origin"));
+    const sameSite = useCrossSiteCookie ? "None" : "Lax";
+    response.setHeader("Set-Cookie", `${sessionCookie}=${token}; HttpOnly; SameSite=${sameSite}; Path=/; Max-Age=28800${useCrossSiteCookie ? "; Secure" : ""}`);
     response.json({ username: account.username, role: account.role });
 }));
 
@@ -422,6 +472,74 @@ app.post("/api/beneficiaries", requireAdmin, asyncRoute(async (request, response
     response.status(201).json(await database.prepare("SELECT * FROM beneficiaries WHERE id = ?").get(result.lastInsertRowid));
 }));
 
+app.get("/api/courses", asyncRoute(async (request, response) => {
+    response.json(await database.prepare("SELECT * FROM courses ORDER BY course_name").all());
+}));
+
+app.post("/api/courses", requireAdmin, asyncRoute(async (request, response) => {
+    const courseName = String(request.body.courseName || "").trim();
+    if (!courseName) return response.status(400).json({ error: "Course name is required." });
+    if (courseName.length > 100) return response.status(400).json({ error: "Course name must be 100 characters or fewer." });
+    const result = await database.prepare("INSERT INTO courses (course_name) VALUES (?)").run(courseName);
+    response.status(201).json(await database.prepare("SELECT * FROM courses WHERE id = ?").get(result.lastInsertRowid));
+}));
+
+app.put("/api/courses/:id", requireAdmin, asyncRoute(async (request, response) => {
+    const courseId = Number(request.params.id);
+    const courseName = String(request.body.courseName || "").trim();
+    if (!Number.isInteger(courseId) || courseId < 1) return response.status(400).json({ error: "Choose a valid course." });
+    if (!courseName) return response.status(400).json({ error: "Course name is required." });
+    if (courseName.length > 100) return response.status(400).json({ error: "Course name must be 100 characters or fewer." });
+    const existingCourse = await database.prepare("SELECT id FROM courses WHERE id = ?").get(courseId);
+    if (!existingCourse) return response.status(404).json({ error: "Course not found." });
+    await database.prepare("UPDATE courses SET course_name = ? WHERE id = ?").run(courseName, courseId);
+    response.json(await database.prepare("SELECT * FROM courses WHERE id = ?").get(courseId));
+}));
+
+app.delete("/api/courses/:id", requireAdmin, asyncRoute(async (request, response) => {
+    const courseId = Number(request.params.id);
+    if (!Number.isInteger(courseId) || courseId < 1) return response.status(400).json({ error: "Choose a valid course." });
+    const course = await database.prepare("SELECT id FROM courses WHERE id = ?").get(courseId);
+    if (!course) return response.status(404).json({ error: "Course not found." });
+    const enrollmentUsage = await database.prepare("SELECT COUNT(*) AS count FROM enrollments WHERE course_id = ?").get(courseId);
+    if (Number(enrollmentUsage.count) > 0) {
+        return response.status(409).json({ error: "This course is used by existing records and cannot be deleted." });
+    }
+    await database.prepare("DELETE FROM courses WHERE id = ?").run(courseId);
+    response.sendStatus(204);
+}));
+
+app.get("/api/enrollments", asyncRoute(async (request, response) => {
+    response.json(await database.prepare(`
+        SELECT enrollments.*, courses.course_name
+        FROM enrollments
+        JOIN courses ON courses.id = enrollments.course_id
+        ORDER BY enrollments.id
+    `).all());
+}));
+
+app.post("/api/enrollments", asyncRoute(async (request, response) => {
+    const studentName = String(request.body.studentName || "").trim();
+    const collegeId = String(request.body.collegeId || "").trim();
+    const courseId = Number(request.body.courseId);
+    const enrollmentDate = String(request.body.enrollmentDate || "").trim();
+    const parsedDate = /^\d{4}-\d{2}-\d{2}$/.test(enrollmentDate)
+        ? new Date(`${enrollmentDate}T00:00:00.000Z`)
+        : null;
+    const validDate = parsedDate && !Number.isNaN(parsedDate.getTime()) && parsedDate.toISOString().slice(0, 10) === enrollmentDate;
+    if (!studentName || !collegeId || !Number.isInteger(courseId) || courseId < 1 || !validDate) {
+        return response.status(400).json({ error: "Enter a student name, college ID, course, and valid enrollment date." });
+    }
+    const result = await database.prepare(
+        "INSERT INTO enrollments (student_name, college_id, course_id, enrollment_date) VALUES (?, ?, ?, ?)"
+    ).run(studentName, collegeId, courseId, enrollmentDate);
+    response.status(201).json(await database.prepare(`
+        SELECT enrollments.*, courses.course_name
+        FROM enrollments JOIN courses ON courses.id = enrollments.course_id
+        WHERE enrollments.id = ?
+    `).get(result.lastInsertRowid));
+}));
+
 app.get("/api/donations", asyncRoute(async (request, response) => {
     response.json(await database.prepare(`
         SELECT donations.*, donors.full_name AS donor_name, campaigns.title AS campaign_title
@@ -450,10 +568,10 @@ app.post("/api/donations", asyncRoute(async (request, response) => {
 
 app.use("/api", (error, request, response, next) => {
     if (error.code === "SQLITE_CONSTRAINT_UNIQUE" || error.code === "23505") {
-        return response.status(409).json({ error: "That email or donation number is already in use." });
+        return response.status(409).json({ error: "That email, donation number, college ID, or course name is already in use." });
     }
     if (error.code === "SQLITE_CONSTRAINT_FOREIGNKEY" || error.code === "23503") {
-        return response.status(400).json({ error: "Select an existing donor and campaign." });
+        return response.status(400).json({ error: "Select an existing donor, campaign, or course." });
     }
     console.error(error);
     response.status(500).json({ error: "The request could not be saved." });
@@ -462,7 +580,7 @@ app.use("/api", (error, request, response, next) => {
 app.get("/", (request, response) => response.redirect(request.user ? "/index.html" : "/login.html"));
 
 app.use((request, response, next) => {
-    if (["/login.html", "/login.js", "/forgot-password.html", "/forgot-password.js", "/style.css"].includes(request.path)) {
+    if (["/login.html", "/login.js", "/api-config.js", "/forgot-password.html", "/forgot-password.js", "/style.css"].includes(request.path)) {
         return next();
     }
     if (!request.user) return response.redirect("/login.html");

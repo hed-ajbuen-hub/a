@@ -11,7 +11,7 @@ npm start
 
 Open [http://localhost:3000](http://localhost:3000). Use this address instead of opening the pages with Live Server; the Express server handles form submissions and database requests.
 
-The app creates a SQLite database named `.donations.sqlite` on first launch and inserts the sample records. New donors, campaigns, beneficiaries, and donations are saved there and remain available after restarting the server.
+The app creates a SQLite database named `.donations.sqlite` on first launch and inserts the sample records. New donors, campaigns, beneficiaries, courses, enrollments, and donations are saved there and remain available after restarting the server. Existing databases gain course and enrollment tables on startup. Administrators manage courses from the Courses page; signed-in users select a course when recording a student enrollment. Enrollment records display the selected course, and courses already in use cannot be deleted.
 
 ## Login accounts
 
@@ -33,13 +33,13 @@ npm start
 
 The recovery form requires the key and a new password of at least 10 characters. A successful reset revokes existing sessions for the regular user. This recovery link cannot reset the administrator password.
 
-## Publish online
+## Publish with GitHub Pages
 
-The app supports hosted PostgreSQL through the `DATABASE_URL` environment variable; local runs without it continue to use SQLite. `render.yaml` prepares the web service for Render, while PostgreSQL is supplied by a separate hosted SQL provider such as Neon.
+GitHub Pages hosts the static HTML, CSS, and JavaScript only. The Express API and database must run on a separate Node-compatible service.
 
-1. Create a private GitHub repository and push this project. Do not include `.donations.sqlite`, `.user-recovery-key`, or `node_modules`.
-2. Create a PostgreSQL database with a provider and copy its connection string. Keep it private.
-3. In Render, create a Blueprint from the GitHub repository. When prompted, set `DATABASE_URL` to the PostgreSQL connection string; the blueprint generates separate admin, user, and recovery secrets.
-4. After deployment, open the URL shown by Render. The first database startup creates the schema and sample rows. The deployed app starts with new accounts and does not automatically copy records from your local SQLite file.
+1. Push this repository to GitHub's `main` branch. The included Pages workflow deploys the website; in repository **Settings > Pages**, choose **GitHub Actions** as the build and deployment source.
+2. Deploy `server.js` to a Node-compatible backend and provide a PostgreSQL `DATABASE_URL`, a private `ADMIN_PASSWORD`, a private `USER_PASSWORD`, and `FRONTEND_ORIGINS=https://hed-ajbuen-hub.github.io` in that backend's environment settings.
+3. Set `window.DONATION_API_URL` in `api-config.js` to the backend's HTTPS origin, with no trailing slash, then push that change to GitHub.
+4. Open the Pages URL after the workflow finishes. The API database is created on first startup; local SQLite records are not copied automatically.
 
-The Render free web service can sleep while idle, and free-tier quotas/provider terms can change. Keep the GitHub repository private and rotate the generated account secrets before sharing the site.
+The API enables credentialed CORS only for `FRONTEND_ORIGINS` and uses secure cross-site cookies in production. Some browsers block third-party cookies between `github.io` and the API host; if sign-in sessions are blocked, use a custom domain for the Pages site and API under the same parent domain.

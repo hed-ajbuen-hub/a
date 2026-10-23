@@ -14,16 +14,26 @@ const pages = {
     beneficiaries: {
         endpoint: "/api/beneficiaries",
         columns: ["id", "full_name", "classification", "eligibility_status"]
+    },
+    courses: {
+        endpoint: "/api/courses",
+        columns: ["id", "course_name"]
+    },
+    enrollments: {
+        endpoint: "/api/enrollments",
+        columns: ["student_name", "college_id", "course_name", "enrollment_date"]
     }
 };
 
 const page = pages[document.body.dataset.page];
 const form = document.querySelector("#record-form");
 const tableBody = document.querySelector("#records-table");
+const submitButton = form.querySelector("button[type='submit']");
 const statusMessage = document.createElement("p");
 statusMessage.setAttribute("role", "status");
 statusMessage.setAttribute("aria-live", "polite");
 form.insertAdjacentElement("afterend", statusMessage);
+let currentUserRole = "user";
 document.querySelectorAll("[data-admin-only]").forEach((section) => {
     section.hidden = true;
 });
@@ -33,11 +43,12 @@ async function initializeSession() {
     try {
         user = await requestJson("/api/auth/me");
     } catch {
-        window.location.replace("/login.html");
+        window.location.replace("login.html");
         return false;
     }
 
     const controls = document.querySelector("[data-session-controls]");
+    currentUserRole = user.role;
     const identity = document.createElement("span");
     identity.className = "session-user";
     identity.append(document.createTextNode(`${user.username} `));
@@ -53,7 +64,7 @@ async function initializeSession() {
         try {
             await requestJson("/api/auth/logout", { method: "POST" });
         } finally {
-            window.location.replace("/login.html");
+            window.location.replace("login.html");
         }
     });
     controls.append(identity, logoutButton);
@@ -108,12 +119,44 @@ function renderRows(records) {
                 row.append(createCell(record[column]));
             }
         }
+        if (page === pages.courses && currentUserRole === "admin") {
+            const actions = document.createElement("td");
+            actions.className = "table-actions";
+            const editButton = document.createElement("button");
+            editButton.className = "table-action";
+            editButton.type = "button";
+            editButton.textContent = "Edit";
+            editButton.addEventListener("click", () => {
+                form.elements.courseName.value = record.course_name;
+                form.dataset.courseId = record.id;
+                submitButton.textContent = "Update Course";
+                form.querySelector("[data-cancel-edit]").hidden = false;
+                form.elements.courseName.focus();
+            });
+            const deleteButton = document.createElement("button");
+            deleteButton.className = "table-action table-action-danger";
+            deleteButton.type = "button";
+            deleteButton.textContent = "Delete";
+            deleteButton.addEventListener("click", async () => {
+                if (!window.confirm(`Delete ${record.course_name}?`)) return;
+                statusMessage.textContent = "";
+                try {
+                    await requestJson(`${page.endpoint}/${record.id}`, { method: "DELETE" });
+                    statusMessage.textContent = "Course deleted.";
+                    await loadRecords();
+                } catch (error) {
+                    statusMessage.textContent = error.message;
+                }
+            });
+            actions.append(editButton, deleteButton);
+            row.append(actions);
+        }
         tableBody.append(row);
     }
 }
 
 async function requestJson(url, options) {
-    const response = await fetch(url, options);
+    const response = await window.apiRequest(url, options);
     const responseText = await response.text();
     let result = {};
     try {
@@ -144,6 +187,9 @@ async function loadDonationOptions() {
     ]);
     const donorSelect = form.elements.donorId;
     const campaignSelect = form.elements.campaignId;
+    for (const select of [donorSelect, campaignSelect]) {
+        select.replaceChildren(select.options[0]);
+    }
     for (const donor of donors) {
         const option = document.createElement("option");
         option.value = donor.id;
@@ -158,18 +204,43 @@ async function loadDonationOptions() {
     }
 }
 
+async function loadCourseOptions() {
+    const courses = await requestJson("/api/courses");
+    const courseSelect = form.elements.courseId;
+    courseSelect.replaceChildren(courseSelect.options[0]);
+    for (const course of courses) {
+        const option = document.createElement("option");
+        option.value = course.id;
+        option.textContent = course.course_name;
+        courseSelect.append(option);
+    }
+}
+
+function resetCourseEdit() {
+    delete form.dataset.courseId;
+    submitButton.textContent = "Add Course";
+    form.querySelector("[data-cancel-edit]").hidden = true;
+}
+
+form.querySelector("[data-cancel-edit]")?.addEventListener("click", () => {
+    form.reset();
+    resetCourseEdit();
+    statusMessage.textContent = "";
+});
+
 form.addEventListener("submit", async (event) => {
     event.preventDefault();
     statusMessage.textContent = "";
-    const submitButton = form.querySelector("button[type='submit']");
     submitButton.disabled = true;
     try {
-        await requestJson(page.endpoint, {
-            method: "POST",
+        const isCourseEdit = page === pages.courses && form.dataset.courseId;
+        await requestJson(isCourseEdit ? `${page.endpoint}/${form.dataset.courseId}` : page.endpoint, {
+            method: isCourseEdit ? "PUT" : "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify(Object.fromEntries(new FormData(form)))
         });
         form.reset();
+        if (page === pages.courses) resetCourseEdit();
         statusMessage.textContent = "Saved successfully.";
         await loadRecords();
         if (page === pages.donations) {
@@ -186,7 +257,8 @@ initializeSession().then((authenticated) => {
     if (!authenticated) return;
     return Promise.all([
         loadRecords(),
-        page === pages.donations ? loadDonationOptions() : Promise.resolve()
+        page === pages.donations ? loadDonationOptions() : Promise.resolve(),
+        page === pages.enrollments ? loadCourseOptions() : Promise.resolve()
     ]).catch((error) => {
         statusMessage.textContent = error.message;
     });

@@ -111,6 +111,33 @@ body {
     background-color: #2563eb;
 }
 
+.secondary-button {
+    margin-left: 8px;
+    background-color: #64748b;
+}
+
+.table-actions {
+    white-space: nowrap;
+}
+
+.table-action {
+    border: 1px solid #cbd5e1;
+    border-radius: 4px;
+    padding: 6px 9px;
+    background: #ffffff;
+    color: #1e3a8a;
+    cursor: pointer;
+    font-weight: bold;
+}
+
+.table-action + .table-action {
+    margin-left: 6px;
+}
+
+.table-action-danger {
+    color: #b42318;
+}
+
 /* Table Styles */
 table {
     width: 100%;

@@ -18,7 +18,7 @@ recoveryForm.addEventListener("submit", async (event) => {
     const submitButton = recoveryForm.querySelector("button[type='submit']");
     submitButton.disabled = true;
     try {
-        const response = await fetch("/api/auth/reset-user-password", {
+        const response = await window.apiRequest("/api/auth/reset-user-password", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
