@@ -162,6 +162,16 @@ table tr:nth-child(even) {
     background-color: #f8fafc;
 }
 
+.status-select {
+    min-width: 120px;
+    margin-right: 8px;
+    padding: 6px 8px;
+    border: 1px solid #cbd5e1;
+    border-radius: 4px;
+    background: #ffffff;
+    color: #1e293b;
+}
+
 /* Status Badges */
 .badge {
     padding: 4px 8px;

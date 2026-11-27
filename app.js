@@ -14,14 +14,6 @@ const pages = {
     beneficiaries: {
         endpoint: "/api/beneficiaries",
         columns: ["id", "full_name", "classification", "eligibility_status"]
-    },
-    courses: {
-        endpoint: "/api/courses",
-        columns: ["id", "course_name"]
-    },
-    enrollments: {
-        endpoint: "/api/enrollments",
-        columns: ["student_name", "college_id", "course_name", "enrollment_date"]
     }
 };
 
@@ -90,19 +82,61 @@ function createCell(value) {
     return cell;
 }
 
-function addStatusCell(row, value) {
+function addStatusCell(row, record, value, statusField) {
     const cell = document.createElement("td");
-    const badge = document.createElement("span");
-    badge.className = "badge";
-    if (["Pending", "Ineligible"].includes(value)) {
-        badge.classList.add("badge-pending");
-    } else if (value === "Completed") {
-        badge.classList.add("badge-completed");
-    } else {
-        badge.classList.add("badge-active");
+
+    if (currentUserRole !== "admin") {
+        const badge = document.createElement("span");
+        badge.className = "badge";
+        if (["Pending", "Ineligible"].includes(value)) {
+            badge.classList.add("badge-pending");
+        } else if (["Completed"].includes(value)) {
+            badge.classList.add("badge-completed");
+        } else {
+            badge.classList.add("badge-active");
+        }
+        badge.textContent = value;
+        cell.append(badge);
+        row.append(cell);
+        return;
     }
-    badge.textContent = value;
-    cell.append(badge);
+
+    const statusOptions = statusField === "eligibility_status"
+        ? ["Eligible", "Pending", "Ineligible"]
+        : statusField === "status" && page === pages.donations
+            ? ["Pending", "Verified", "Completed"]
+            : ["Active", "Pending", "Completed"];
+
+    const select = document.createElement("select");
+    select.className = "status-select";
+    for (const optionValue of statusOptions) {
+        const option = document.createElement("option");
+        option.value = optionValue;
+        option.textContent = optionValue;
+        option.selected = optionValue === value;
+        select.append(option);
+    }
+
+    const saveButton = document.createElement("button");
+    saveButton.type = "button";
+    saveButton.className = "table-action";
+    saveButton.textContent = "Save";
+    saveButton.addEventListener("click", async () => {
+        saveButton.disabled = true;
+        try {
+            await requestJson(`${page.endpoint}/${record.id}`, {
+                method: "PUT",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ [statusField]: select.value })
+            });
+            await loadRecords();
+        } catch (error) {
+            statusMessage.textContent = error.message;
+            saveButton.disabled = false;
+        }
+    });
+
+    cell.append(select, saveButton);
     row.append(cell);
 }
 
@@ -112,58 +146,12 @@ function renderRows(records) {
         const row = document.createElement("tr");
         for (const column of page.columns) {
             if (column === "status" || column === "eligibility_status") {
-                addStatusCell(row, record[column]);
+                addStatusCell(row, record, record[column], column);
             } else if (["target_amount", "current_amount", "amount"].includes(column)) {
                 row.append(createCell(formatMoney(record[column])));
             } else {
                 row.append(createCell(record[column]));
             }
-        }
-        if ((page === pages.courses && currentUserRole === "admin") || page === pages.enrollments) {
-            const actions = document.createElement("td");
-            actions.className = "table-actions";
-            const editButton = document.createElement("button");
-            editButton.className = "table-action";
-            editButton.type = "button";
-            editButton.textContent = "Edit";
-            editButton.addEventListener("click", () => {
-                if (page === pages.courses) {
-                    form.elements.courseName.value = record.course_name;
-                    form.dataset.courseId = record.id;
-                    submitButton.textContent = "Update Course";
-                } else {
-                    form.elements.studentName.value = record.student_name;
-                    form.elements.collegeId.value = record.college_id;
-                    form.elements.courseId.value = record.course_id;
-                    form.elements.enrollmentDate.value = record.enrollment_date;
-                    form.dataset.enrollmentId = record.id;
-                    submitButton.textContent = "Update Enrollment";
-                }
-                form.querySelector("[data-cancel-edit]").hidden = false;
-                form.elements[page === pages.courses ? "courseName" : "studentName"].focus();
-            });
-            const deleteButton = document.createElement("button");
-            deleteButton.className = "table-action table-action-danger";
-            deleteButton.type = "button";
-            deleteButton.textContent = "Delete";
-            deleteButton.addEventListener("click", async () => {
-                const recordName = page === pages.courses ? record.course_name : record.student_name;
-                if (!window.confirm(`Delete ${recordName}?`)) return;
-                statusMessage.textContent = "";
-                try {
-                    await requestJson(`${page.endpoint}/${record.id}`, { method: "DELETE" });
-                    statusMessage.textContent = page === pages.courses ? "Course deleted." : "Enrollment deleted.";
-                    if (page === pages.enrollments && form.dataset.enrollmentId === String(record.id)) {
-                        form.reset();
-                        resetEnrollmentEdit();
-                    }
-                    await loadRecords();
-                } catch (error) {
-                    statusMessage.textContent = error.message;
-                }
-            });
-            actions.append(editButton, deleteButton);
-            row.append(actions);
         }
         tableBody.append(row);
     }
@@ -218,53 +206,17 @@ async function loadDonationOptions() {
     }
 }
 
-async function loadCourseOptions() {
-    const courses = await requestJson("/api/courses");
-    const courseSelect = form.elements.courseId;
-    courseSelect.replaceChildren(courseSelect.options[0]);
-    for (const course of courses) {
-        const option = document.createElement("option");
-        option.value = course.id;
-        option.textContent = course.course_name;
-        courseSelect.append(option);
-    }
-}
-
-function resetCourseEdit() {
-    delete form.dataset.courseId;
-    submitButton.textContent = "Add Course";
-    form.querySelector("[data-cancel-edit]").hidden = true;
-}
-
-function resetEnrollmentEdit() {
-    delete form.dataset.enrollmentId;
-    submitButton.textContent = "Save Enrollment";
-    form.querySelector("[data-cancel-edit]").hidden = true;
-}
-
-form.querySelector("[data-cancel-edit]")?.addEventListener("click", () => {
-    form.reset();
-    if (page === pages.courses) resetCourseEdit();
-    if (page === pages.enrollments) resetEnrollmentEdit();
-    statusMessage.textContent = "";
-});
-
 form.addEventListener("submit", async (event) => {
     event.preventDefault();
     statusMessage.textContent = "";
     submitButton.disabled = true;
     try {
-        const editId = page === pages.courses
-            ? form.dataset.courseId
-            : page === pages.enrollments ? form.dataset.enrollmentId : null;
-        await requestJson(editId ? `${page.endpoint}/${editId}` : page.endpoint, {
-            method: editId ? "PUT" : "POST",
+        await requestJson(page.endpoint, {
+            method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify(Object.fromEntries(new FormData(form)))
         });
         form.reset();
-        if (page === pages.courses) resetCourseEdit();
-        if (page === pages.enrollments) resetEnrollmentEdit();
         statusMessage.textContent = "Saved successfully.";
         await loadRecords();
         if (page === pages.donations) {
@@ -279,9 +231,7 @@ form.addEventListener("submit", async (event) => {
 
 initializeSession().then((authenticated) => {
     if (!authenticated) return;
-    const recordsPromise = page === pages.enrollments
-        ? loadCourseOptions().then(loadRecords)
-        : loadRecords();
+    const recordsPromise = loadRecords();
     return Promise.all([
         recordsPromise,
         page === pages.donations ? loadDonationOptions() : Promise.resolve()
